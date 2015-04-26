@@ -1,0 +1,106 @@
+---
+title: "MachineLearningProject"
+author: "Marcus Kleber"
+date: "Saturday, April 25, 2015"
+output: word_document
+---
+
+# Course Project Machine Learning 
+
+The aim of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell to predict the manner in which participants of the study did the their barbell lifts. Response variable is the *"classe"* variable in the dataset. 
+
+Tasks are:  
+ 1. To develop an algorithm to predict *"classe"*  
+ 2. To use cross validation to estimate the out of sample error  
+ 3. To predict 20 different test cases  
+ 
+ ***
+ 
+At the beginning necessary libraries and both training and test datasets are loaded
+```{r}
+library("caret")
+library("kernlab")
+library("pls")
+library("ipred")
+library("plyr")
+
+
+pmltrain <- read.csv("pml-training.csv",header=T)
+pmltest <- read.csv("pml-testing.csv",header=T)
+dim(pmltrain)
+```
+
+The dataset contains a lot of variables. To reduce the number of variables we first find out which of them have almost zero variance and sort them out.
+
+```{r}
+nzv <- nearZeroVar(pmltrain,saveMetrics=T)
+rem <- which(nzv$nzv == TRUE)
+pmltrain <- pmltrain[,-rem]
+pmltest <- pmltest[,-rem]
+dim(pmltrain)
+```
+
+There are still a lot of variables left. Lets have a look at them.
+
+```{r}
+summary(pmltrain)
+```
+
+A number of variables has many NAs. Imputation doesn't make sense so we will exclude those variables with more than 50% missings.
+
+```{r}
+traindf <- pmltrain[ , sapply(pmltrain, function(x) mean(is.na(x))<0.5)]
+testdf <- pmltest[ , sapply(pmltest, function(x) mean(is.na(x))<0.5)]
+dim(traindf)
+str(traindf)
+```
+The *cvtd_timestamp* variable is a factor with 20 levels. We will remove it and then create dummy variables for all the other factor variables in the dataset. 
+
+```{r}
+traindf <- traindf[,-5]
+testdf <- testdf[,-5]
+
+dvars <- dummyVars(classe ~ .,data=traindf)  
+dummytrain <- predict(dvars, newdata=traindf)
+dummytrain <- data.frame(dummytrain,traindf$classe)
+
+dvars2 <- dummyVars(~ .,data=testdf)
+dummytest <- predict(dvars2, newdata=testdf)
+dummytest <- data.frame(dummytest[,1:62])
+
+```
+
+Now that we have converted all factor variables to dummy variables we calculate principle components to reduce the number of variables.
+
+```{r}
+preProcess(dummytrain[,-63],method="pca",thresh=0.8)
+PreProc <- preProcess(dummytrain[,-63],method="pca",pcaComp=13)
+pcatrain <- predict(PreProc,dummytrain[,-63])
+pcatrain <- data.frame(traindf$classe,pcatrain)
+g <- ggplot(pcatrain,aes(x=PC1,y=PC2,color=traindf.classe)) + geom_point(alpha=0.5)
+g
+pcatest <- predict(PreProc,dummytest[,])
+```
+
+Now we fit several models usind PLS, bagged tree and support vector machines. We test the accuracy using 5-fold cross validation.
+
+```{r}
+ctrl <- trainControl(method = "repeatedcv",repeats = 5)
+
+modelfit1 <- train(traindf.classe ~.,data=pcatrain,method="pls",trControl = ctrl)
+modelfit1
+modelfit2 <- train(traindf.classe ~.,data=pcatrain,method="treebag",trControl = ctrl)
+modelfit2
+modelfit3 <- train(traindf.classe ~.,data=pcatrain,method="svmRadial",trControl = ctrl)
+modelfit3
+
+```
+
+The accuracy of the PLS model is bad while the tree model seems to be overfitted. Therefore, the best model seems to be the __SVM__ model using a radial kernel with an accuracy of 0.92. We compare predicted vs observed values and then use this model to predict *classe* in the 20 test samples.
+
+```{r}
+confusionMatrix(pcatrain$traindf.classe,predict(modelfit3,pcatrain))
+testclasse <- predict(modelfit3,pcatest)
+testclasse
+```
+
